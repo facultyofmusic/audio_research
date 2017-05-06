@@ -36,18 +36,20 @@ public class Main implements SourceSelectionPanel.SourceSelectionListener {
         System.exit(0);
     }
 
+    @Override
+    public void newSourceSelected(AudioInputStream in) {
+        new Streamer(in).execute();
+    }
+
     public static void main(String[] args) {
+        System.setProperty("java.util.logging.SimpleFormatter.format",
+                "%4$s [%2$s] %5$s%6$s%n");
+
         EventQueue.invokeLater(new Runnable() {
             @Override
             public void run() {
                 new Main();
             }
         });
-    }
-
-    @Override
-    public void newSourceSelected(AudioInputStream in) {
-        new Streamer(in).execute();
-
     }
 }
