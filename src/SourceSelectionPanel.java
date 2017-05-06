@@ -3,40 +3,73 @@ import javax.swing.*;
 import java.awt.*;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.io.File;
 import java.io.IOException;
+import java.util.logging.Logger;
+
 
 /**
- * Created by dgli on 5/3/17.
+ * This panel implements the audio source selection mechanism.  It is responsible for
+ * notifying listeners for source selection changes.
  */
 public class SourceSelectionPanel extends JPanel implements ActionListener {
-    String[] sourceNames = {"None", "Microphone", "Choose File..."};
-    int currentSourceIndex = 0;
-    JComboBox sourceSelector;
+    private static final Logger log = Logger.getLogger(SourceSelectionPanel.class.getName());
+    private static final String[] DEFAULT_SOURCE_NAMES = {"None", "Microphone", "Choose File..."};
 
-    AudioInputStream currentInputStream;
-    SourceSelectionListener listener;
+    // UI control
+    private DefaultComboBoxModel<String> selectorModel;
+    private JComboBox<String> sourceSelector;
+    private JFileChooser fileChooser;
+    private File currentFile = null;
+    private int currentSourceIndex = 0;
 
+    // Audio
+    private AudioInputStream currentInputStream;
 
+    /**
+     * There is only one listener because handling and managing an audio input stream
+     * between more than one consumers is outside the scope of this class.
+     */
+    private SourceSelectionListener listener;
 
     public SourceSelectionPanel(SourceSelectionListener listener) {
         this.listener = listener;
 
         this.setLayout(new FlowLayout());
 
-        sourceSelector = new JComboBox(sourceNames);
+        selectorModel = new DefaultComboBoxModel<>(DEFAULT_SOURCE_NAMES);
+
+        sourceSelector = new JComboBox<>(selectorModel);
         sourceSelector.setSelectedIndex(0);
         sourceSelector.addActionListener(this);
+
+        fileChooser = new JFileChooser();
 
         this.add(new JLabel("Select source:"));
         this.add(sourceSelector);
     }
 
-    private void loadNewFile() {
-        System.out.println("Loading new file...");
+    /**
+     * Attempt to choose a new file.
+     * @return true of file was selected.
+     */
+    private boolean loadNewFile() {
+        log.info("Loading new file...");
+
+        int retVal = fileChooser.showOpenDialog(this);
+        if (retVal == JFileChooser.APPROVE_OPTION) {
+            currentFile = fileChooser.getSelectedFile();
+            return true;
+        } else {
+            log.info("File selection canceled.  Aborting.");
+            return false;
+        }
     }
 
-    private void setSource(boolean isMicrophone) {
-        // should always close streams when no longer used.
+    /**
+     * Closes the current audio input stream of there is one open.
+     */
+    private void closeCurrentInputStreamIfOpen() {
         if (currentInputStream != null) {
             try {
                 currentInputStream.close();
@@ -44,19 +77,27 @@ public class SourceSelectionPanel extends JPanel implements ActionListener {
                 ex.printStackTrace();
             }
         }
+    }
+
+    /**
+     * Switch, init, and open audio lines of one of 2 sources: microphone or the currently
+     * selected file.
+     * @param isMicrophone true to switch to microphone.
+     */
+    private void setSource(boolean isMicrophone) {
+        closeCurrentInputStreamIfOpen();
 
         if (isMicrophone) {
-            System.out.println("Switching to microphone");
+            log.info("Switching to microphone");
 
             try {
+                //TODO should move this somewhere else and make it configurable.
                 AudioFormat format = new AudioFormat(AudioFormat.Encoding.PCM_SIGNED, 44100,
                         16, 1, 2, 44100, true);
-//                AudioFormat format = new AudioFormat(8000.0f, 16, 1,
-//                        true, true);
                 TargetDataLine microphoneLine = AudioSystem.getTargetDataLine(format);
                 DataLine.Info info = new DataLine.Info(TargetDataLine.class, format);
 
-                System.out.println("Opening microphone: " + info);
+                log.info("Opening microphone: " + info);
 
                 microphoneLine.open();
                 currentInputStream = new AudioInputStream(microphoneLine);
@@ -71,10 +112,24 @@ public class SourceSelectionPanel extends JPanel implements ActionListener {
             currentSourceIndex = 1;
 
         } else {
-            System.out.println("Switching to file");
+            log.info("Switching to file " + currentFile);
+
+            try {
+                AudioSystem.getAudioFileFormat(currentFile); // this fails if file is unsupported.
+                selectorModel.removeElementAt(0);
+                selectorModel.insertElementAt(currentFile.getName(), 0);
+                currentInputStream = AudioSystem.getAudioInputStream(currentFile);
+                listener.newSourceSelected(currentInputStream);
+
+            } catch (UnsupportedAudioFileException ex) {
+                log.warning("Format in " + currentFile + " unsupported.");
+                currentFile = null;
+            } catch (IOException ex) {
+                ex.printStackTrace();
+                currentFile = null;
+            }
 
             currentSourceIndex = 0;
-
         }
     }
 
@@ -84,21 +139,26 @@ public class SourceSelectionPanel extends JPanel implements ActionListener {
             int sourceIndex = sourceSelector.getSelectedIndex();
 
             if (sourceIndex == 2) {
-                // TODO select a new file.
-                loadNewFile();
-                setSource(false);
+                // Only set the source of file is loaded successfully.
+                if (loadNewFile()) {
+                    setSource(false);
+                }
 
             } else if (sourceIndex == 1 && currentSourceIndex != 1) {
-                // TODO select microphone.
                 setSource(true);
 
             } else if (sourceIndex == 0 && currentSourceIndex != 0){
-                // TODO set to prev file.
                 setSource(false);
             }
+
+            // No matter what set the current selected source to the "new current source".
+            sourceSelector.setSelectedIndex(currentSourceIndex);
         }
     }
 
+    /**
+     * A listener interface for classes that want to listen to source selection events.
+     */
     public interface SourceSelectionListener {
         void newSourceSelected(AudioInputStream in);
     }
